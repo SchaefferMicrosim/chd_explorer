@@ -1,0 +1,26 @@
+
+digraph {
+  graph [layout=neato, splines=true, overlap=false, fontname="Helvetica", bgcolor="transparent"];
+  node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=15, margin="0.18,0.09"];
+  edge  [color="#6b7785", arrowsize=0.7];
+
+  init [pos="-0.6,0!", fillcolor="#e3ecf7", color="#4c9be8",
+        label="Initial conditions (at birth)\n\nFixed: CHD severity, sex, race/ethnicity,\nparent education, insurance, family poverty\n\nJoint draws:\ndevelopmental delay, intellectual disability;\never diagnosed with anxiety, depression,\nor behavioral problems, and at what age\n(revealed when the child reaches that age)"];
+  center [pos="8.60,0.00!", shape=plaintext, style="", fontsize=16, fontcolor="#4a5563",
+          label="Each year of age\nchildhood outcomes 1-17\nmortality through 24"];
+  mort [pos="8.60,3.40!", label="1. Mortality\nlife table x severity risk", fillcolor="#f7e6e4", color="#c8433b"];
+  hlth [pos="12.06,2.12!", label="2. Health\nspecial health care needs;\nconditions revealed at onset age", fillcolor="#f4f6f8", color="#9aa5b1"];
+  util [pos="12.91,-0.76!", label="3. Health care use\nER visits, specialist visits", fillcolor="#f4f6f8", color="#9aa5b1"];
+  par [pos="10.52,-3.06!", label="4. Impacts on parents\nstopped working,\ndifficulty affording essentials", fillcolor="#f4f6f8", color="#9aa5b1"];
+  child [pos="6.68,-3.06!", label="5. Additional impacts on child\naccess to care, exercise,\ngrades, school absence", fillcolor="#f4f6f8", color="#9aa5b1"];
+  srh [pos="4.29,-0.76!", label="6. Overall health\nself-rated health, QALY weight", fillcolor="#f4f6f8", color="#9aa5b1"];
+  cost [pos="5.14,2.12!", label="7. Costs\nclaims models: age, severity,\nsex, year of death", fillcolor="#fdf1de", color="#e8a33d"];
+  mort -> hlth;
+  hlth -> util;
+  util -> par;
+  par -> child;
+  child -> srh;
+  srh -> cost;
+  cost -> mort [label="  next age", fontsize=13, fontcolor="#6b7785", style=dashed];
+  init -> mort [penwidth=1.3];
+}
