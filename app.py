@@ -589,12 +589,19 @@ interventions = [iv for iv in cum["iv_outcome"].unique() if iv]
 iv_label_to_key = {INTERVENTION_LABELS.get(iv, iv): iv for iv in interventions}
 
 LIFE = load_lifetime(data_stamp())
-tab_names = ["About", "Baseline (0-17)", "Interventions (0-17)", "By age (0-24)"]
-if LIFE is not None:
-    tab_names.insert(1, "Lifetime")
-_tabs = st.tabs(tab_names)
-tab_about, tab_base, tab_iv, tab_age = (_tabs[0],) + tuple(_tabs[-3:])
-tab_life = _tabs[1] if LIFE is not None else None
+_vp = DATA_DIR / "visit_prices.csv"
+USE_PRICES = pd.read_csv(_vp) if _vp.exists() else None
+COSTS_RAW = _raw[2]   # with the _comm / _mcaid columns (the payer views drop them)
+HAS_USE = (USE_PRICES is not None and COSTS_RAW is not None and surv is not None
+           and "n_inpatient_visits_mcaid" in COSTS_RAW.columns)
+tab_names = ["About"] + (["Lifetime"] if LIFE is not None else []) + \
+            (["Health care use"] if HAS_USE else []) + \
+            ["Baseline (0-17)", "Interventions (0-17)", "By age (0-24)"]
+_tabs = dict(zip(tab_names, st.tabs(tab_names)))
+tab_about, tab_base, tab_iv, tab_age = (_tabs["About"], _tabs["Baseline (0-17)"],
+                                        _tabs["Interventions (0-17)"], _tabs["By age (0-24)"])
+tab_life = _tabs.get("Lifetime")
+tab_use = _tabs.get("Health care use")
 
 # ---------------------------------------------------------------------
 # About (landing page)
@@ -1353,6 +1360,72 @@ if tab_life is not None:
             st.plotly_chart(fig, width="stretch")
             st.caption("Change from baseline in {} for {} CHD, at each simulated pair of "
                        "intensities.".format(surf_out.lower(), HS_LABELS[sh].lower()))
+
+# ---------------------------------------------------------------------
+# Health care use: savings from averted visits (0-24)
+# ---------------------------------------------------------------------
+VISIT_LABELS = {"n_inpatient_visits": ("Hospitalizations", "hospitalization"),
+                "n_ed_visits": ("ED visits", "ED visit"),
+                "n_op_clinic_visits": ("Outpatient clinic visits", "clinic visit")}
+
+if tab_use is not None:
+    with tab_use:
+        st.subheader("What averting hospital, ED or clinic visits would save, birth to 24")
+        st.markdown(
+            "Each year, the model predicts a child's hospitalizations, ED visits and outpatient clinic "
+            "visits, then insurer payments given that use. Payments rise by a fixed amount per visit "
+            "(the claims models are linear), so the savings from fewer visits follow directly: no "
+            "extra simulation is needed.")
+        u1, u2 = st.columns(2)
+        v_lab = u1.selectbox("Type of visit", [VISIT_LABELS[v][0] for v in VISIT_LABELS], key="use_v")
+        vcol = [v for v in VISIT_LABELS if VISIT_LABELS[v][0] == v_lab][0]
+        red = u2.slider("Reduction in visits (%)", 0, 50, 10, step=1, format="%d%%", key="use_red")
+        hs_u = group_picker("use_groups", CHD_STATES)
+
+        base_c = COSTS_RAW[COSTS_RAW["scenario"] == "baseline"]
+        sv = surv[surv["scenario"] == "baseline"].groupby(["heart_state", "age"])["survival"].mean()
+        price = USE_PRICES.set_index(["payer", "visit"])["price"]
+        b_comm, b_mcaid = price[("comm", vcol)], price[("mcaid", vcol)]
+        rows_u, frac = [], red / 100.0
+        for h in hs_u:
+            d = base_c[base_c["heart_state"] == h].set_index("age").sort_index()
+            d = d[d.index <= 24]
+            if d.empty:
+                continue
+            # payer weight at each age, recovered from the blended and payer-specific totals
+            p = ((d["tot_pay_comm"] - d["tot_pay"]) /
+                 (d["tot_pay_comm"] - d["tot_pay_mcaid"])).clip(0, 1).fillna(0)
+            s_a = sv.loc[h].reindex(d.index).ffill().to_numpy()
+            disc = (1.03) ** -d.index.to_numpy(dtype=float)
+            v_c, v_m = d[vcol + "_comm"].to_numpy(), d[vcol + "_mcaid"].to_numpy()
+            visits = s_a * ((1 - p) * v_c + p * v_m)
+            sav = frac * s_a * ((1 - p) * v_c * b_comm + p * v_m * b_mcaid)
+            n_vis, n_sav, n_sav_d = visits.sum(), sav.sum(), (sav * disc).sum()
+            per_visit = n_sav / (frac * n_vis) if frac > 0 and n_vis > 0 else np.nan
+            births_h = (us_births(meta) or {}).get(h, np.nan)
+            rows_u.append({"Group": HS_LABELS[h],
+                           "{} per child, 0-24".format(v_lab): "{:,.1f}".format(n_vis),
+                           "Averted per child": "{:,.2f}".format(frac * n_vis),
+                           "Savings per averted {}".format(VISIT_LABELS[vcol][1]): life_fmt(per_visit, "usd"),
+                           "Savings per child born": life_fmt(n_sav, "usd"),
+                           "Discounted": life_fmt(n_sav_d, "usd"),
+                           "Per year of U.S. births": agg_fmt(n_sav * births_h, "usd")})
+        if rows_u:
+            st.dataframe(pd.DataFrame(rows_u), width="stretch", hide_index=True)
+        st.markdown("**Insurer payment per {} in the claims models**".format(VISIT_LABELS[vcol][1]))
+        pc1, pc2, _ = st.columns([1, 1, 2])
+        pc1.metric("Commercial", life_fmt(b_comm, "usd"))
+        pc2.metric("Medicaid", life_fmt(b_mcaid, "usd"))
+        st.caption(
+            "Savings = the reduction × the visits each child would have had at each age (counting only "
+            "children still alive) × the insurer payment per visit, weighted by the chance the child is "
+            "covered by Medicaid or commercial insurance at that age. Discounted at 3% to birth. "
+            "The payment per visit is the average for children in the claims data, including "
+            "surgical and other planned admissions; the visits a program could realistically prevent "
+            "may cost less, so these are upper estimates for avoidable-visit programs. In the "
+            "Medicaid model, an ED visit adds essentially nothing to total payments once "
+            "hospitalizations and clinic visits are accounted for. Visits do not feed back into "
+            "health in the model, so this changes costs only, through age 24.")
 
 st.divider()
 st.caption("Data generated {}, revision {}.".format(
