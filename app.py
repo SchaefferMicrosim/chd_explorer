@@ -646,8 +646,11 @@ with tab_about:
         # Collapsed to one line first: Markdown would otherwise read the
         # indented, blank-line-separated SVG source as a code block.
         _svg = re.sub(r"<!--.*?-->", "", FLOW_SVG.read_text(encoding="utf-8"), flags=re.S)
-        st.markdown(" ".join(line.strip() for line in _svg.splitlines() if line.strip()),
-                    unsafe_allow_html=True)
+        # The prose column is 3/4 of the page; let the diagram use the full
+        # width so its labels stay legible.
+        st.markdown('<div style="width:133%">' +
+                    " ".join(line.strip() for line in _svg.splitlines() if line.strip()) +
+                    "</div>", unsafe_allow_html=True)
     st.markdown(
         "Each child starts with a set of **initial conditions** drawn at birth. Some are known "
         "right away; others, such as an eventual anxiety or depression diagnosis, are drawn at "

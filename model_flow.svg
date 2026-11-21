@@ -6,7 +6,7 @@
     .label { font-size: 12px; font-weight: 600; fill: #4A5060; }
     .body { font-size: 12px; fill: #3A3F4B; }
     .chiptitle { font-size: 13.5px; font-weight: 600; }
-    .chipbody { font-size: 11.5px; fill: #4A5060; }
+    .chipbody { font-size: 11px; fill: #4A5060; }
     .age { font-size: 11px; fill: #7A8090; }
     .num { font-size: 12px; font-weight: 600; fill: #3A3F4B; }
     .note { font-size: 12px; fill: #5F6470; }
@@ -26,6 +26,7 @@
   <!-- Birth panel -->
   <rect x="10" y="40" width="236" height="234" rx="10" fill="#EEF2F7" stroke="#A9B6C7"/>
   <text class="title" x="26" y="66">Initial conditions</text>
+  <path d="M230,55 l6,6 l-6,6 l-6,-6 z" fill="#2F4B7C"/>
   <text class="label" x="26" y="92">Fixed</text>
   <text class="body" x="26" y="110">CHD severity, sex, race/ethnicity,</text>
   <text class="body" x="26" y="126">parent education, insurance,</text>
@@ -54,7 +55,6 @@
     <!-- 2 Health -->
     <rect x="398" y="56" width="92" height="132" rx="8" fill="#FFFFFF" stroke="#C5CBD3"/>
     <circle cx="414" cy="73" r="10" fill="#E6E9EE"/><text class="num" x="414" y="77" text-anchor="middle">2</text>
-    <path d="M474,67 l6,6 l-6,6 l-6,-6 z" fill="#2F4B7C"/>
     <text class="chiptitle" x="406" y="104">Health</text>
     <text class="chipbody" x="406" y="122">Special needs;</text>
     <text class="chipbody" x="406" y="137">conditions</text>
@@ -74,8 +74,8 @@
     <circle cx="610" cy="73" r="10" fill="#E6E9EE"/><text class="num" x="610" y="77" text-anchor="middle">4</text>
     <text class="chiptitle" x="602" y="104">Parents</text>
     <text class="chipbody" x="602" y="122">Stopped work;</text>
-    <text class="chipbody" x="602" y="137">trouble affording</text>
-    <text class="chipbody" x="602" y="152">essentials</text>
+    <text class="chipbody" x="602" y="137">trouble paying</text>
+    <text class="chipbody" x="602" y="152">for essentials</text>
     <text class="age" x="602" y="178">ages 0–17</text>
 
     <!-- 5 Child -->
@@ -137,6 +137,6 @@
 
   <!-- Notes -->
   <path d="M16,298 l6,6 l-6,6 l-6,-6 z" fill="#2F4B7C"/>
-  <text class="note" x="30" y="308">Where interventions enter. Childhood: mortality (step 1) and conditions (step 2). Adult: risks in the Future Adult Model.</text>
+  <text class="note" x="30" y="308">Where interventions enter. Childhood: mortality (step 1) and conditions (drawn at birth). Adult: risks in the Future Adult Model.</text>
   <text class="note" x="10" y="330">Each step can use results from earlier steps that year, never later ones, so interventions flow downstream only.</text>
 </svg>
