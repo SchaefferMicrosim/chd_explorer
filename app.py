@@ -328,9 +328,9 @@ LIFE_PER_BIRTH = [
     ("LE", "Life expectancy (years)", "yr"),
     ("share_reach_25", "Alive at 25 (%)", "pct"),
     ("YPLL", "Years of life lost before 75", "yr"),
-    ("WVAS_LIFETIME", "Lifetime QALYs (VAS)", "q"),
-    ("WVAS_LIFETIME_DIS", "Lifetime QALYs (VAS), discounted", "q"),
-    ("WVAS_0_24", "QALYs (VAS), ages 0-24", "q"),
+    ("WVAS_LIFETIME", "Lifetime QALYs (GRACE)", "q"),
+    ("WVAS_LIFETIME_DIS", "Lifetime QALYs (GRACE), discounted", "q"),
+    ("WVAS_0_24", "QALYs (GRACE), ages 0-24", "q"),
     ("TOTPAY_0_24", "Insurer payments, ages 0-24", "usd"),
     ("TOTPAY_0_24_DIS", "Insurer payments, ages 0-24, discounted", "usd"),
     ("TOTMD_DIS_PB", "Medical spending, ages 25+, discounted", "usd"),
@@ -339,7 +339,7 @@ LIFE_PER_BIRTH = [
     ("IEARN_DIS_PB", "Lifetime earnings, discounted", "usd"),
 ]
 LIFE_PER_ADULT = [
-    ("WVAS_UNDIS", "QALYs (VAS) from age 25", "q"),
+    ("WVAS_UNDIS", "QALYs (GRACE) from age 25", "q"),
     ("FIRST_EDUC3", "College degree at 25 (%)", "pct"),
     ("FIRST_EDUC4", "Beyond college at 25 (%)", "pct"),
     ("FIRST_HEARTE", "Heart disease at 25 (%)", "pct"),
@@ -1106,13 +1106,50 @@ def tile_fmt(v, unit, signed=False):
     return life_fmt(v, unit, signed)
 
 
+# ICHOM Standard Set domains on the burden page. Headline items per domain:
+# (source, column, label, unit, higher_is_worse). Source "life" = lifetime
+# linked results; "child" = childhood totals, birth to 17.
+ICHOM_HEADLINE = [
+    ("Overall health", "Health-related quality of life", [
+        ("life", "WVAS_LIFETIME", "Lifetime QALYs (GRACE)", "q", False),
+        ("life", "WVAS_0_24", "QALYs (GRACE), ages 0-24", "q", False)]),
+    ("Physical health", "Survival and development", [
+        ("life", "LE", "Life expectancy (years)", "yr", False),
+        ("child", "years_dev_delay", "Years with developmental delay, 0-17", "yr", True),
+        ("child", "years_int_dis_modsev", "Years with intellectual disability, 0-17", "yr", True)]),
+    ("Mental health", "Mental health diagnoses", [
+        ("child", "years_anxiety", "Years with anxiety, 0-17", "yr", True),
+        ("child", "years_depression", "Years with depression, 0-17", "yr", True),
+        ("child", "years_behavioral_problems", "Years with behavioral problems, 0-17", "yr", True)]),
+    ("Social health", "School, family and work", [
+        ("child", "years_school_absence", "Years with a week+ of school missed, 0-17", "yr", True),
+        ("child", "years_stopwork_ind", "Years a parent stopped working, 0-17", "yr", True),
+        ("life", "FIRST_EDUC3", "College degree by 25 (of those alive)", "pct", False)]),
+]
+# Every childhood total on the burden page, by ICHOM domain (expander table).
+ICHOM_CHILD = [
+    ("Overall health", ["wvas_0_17"]),
+    ("Physical health", ["died_before_18", "life_years", "years_dev_delay", "years_int_dis_modsev",
+                         "years_spec_care", "years_no_exercise"]),
+    ("Mental health", ["years_anxiety", "years_depression", "years_behavioral_problems"]),
+    ("Social health", ["years_school_absence", "years_low_grades", "years_stopwork_ind",
+                       "years_essentials_difficulty", "years_access_to_care"]),
+]
+LIFE_DOMAIN = {"LE": "Physical health", "share_reach_25": "Physical health", "YPLL": "Physical health",
+               "WVAS_LIFETIME": "Overall health", "WVAS_LIFETIME_DIS": "Overall health", "WVAS_0_24": "Overall health",
+               "WVAS_UNDIS": "Overall health", "IEARN_DIS_PB": "Social health", "FIRST_EDUC3": "Social health",
+               "FIRST_EDUC4": "Social health", "DICLAIM_UNDIS": "Social health", "K6SEVERE_UNDIS": "Mental health",
+               "FIRST_HEARTE": "Physical health", "HEARTE_UNDIS": "Physical health", "STROKE_UNDIS": "Physical health",
+               "HIBPE_UNDIS": "Physical health", "DIABE_UNDIS": "Physical health", "LUNGE_UNDIS": "Physical health",
+               "CANCRE_UNDIS": "Physical health"}
+
 TILE_HELP = {"TOTMD_DIS": "Average over adults alive at 25, discounted at 3% to age 25. Per child "
                           "born it is lower for severe CHD, because fewer children reach 25."}
 # Totals for a year of births must count every birth, so they use the per-birth version.
 US_TILE_COL = {"TOTMD_DIS": ("TOTMD_DIS_PB", "Medical spending from 25, discounted")}
 
 BURDEN_TILES = [("LE", "Life expectancy (years)", "yr", False),
-                ("WVAS_LIFETIME", "Lifetime QALYs (VAS)", "q", False),
+                ("WVAS_LIFETIME", "Lifetime QALYs (GRACE)", "q", False),
                 ("TOTPAY_0_24", "Insurer payments, ages 0-24", "usd", True),
                 # Per adult alive at 25: per child born, fewer severe-CHD children reach 25,
                 # which outweighs their higher spending and reads as a saving.
@@ -1174,46 +1211,121 @@ if tab_burden is not None:
             else:
                 st.caption("Small figures under each value: the excess over children without CHD.")
 
-            st.markdown("#### All outcomes")
+            # ---- ICHOM domains: one group at a time, a few outcomes per domain
+            st.markdown("#### What CHD changes, by ICHOM domain")
+            st.caption("The outcome domains of the ICHOM Standard Set for congenital heart disease. "
+                       "See About for how the model's measures map to them.")
+            ch_b = cum[cum["scenario"] == "baseline"].groupby("heart_state").mean(numeric_only=True)
+            w_b = None
+            if births_b:
+                tot_b = sum(births_b[h] for h in groups)
+                w_b = {h: births_b[h] / tot_b for h in groups}
+            g_opts = [HS_LABELS[h] for h in groups] + (["All CHD"] if w_b else [])
+            g_sel = st.radio("Group", g_opts, index=g_opts.index("Severe") if "Severe" in g_opts else 0,
+                             horizontal=True, key="burden_ichom_group")
 
-            def burden_table(spec):
+            def val(src, c, h):
+                t = bl if src == "life" else ch_b
+                if c not in t.columns:
+                    return np.nan
+                if h == "all":
+                    return sum(w_b[g] * t.loc[g, c] for g in groups)
+                return t.loc[h, c]
+
+            hsel = "all" if g_sel == "All CHD" else [h for h in groups if HS_LABELS[h] == g_sel][0]
+
+            def one(v, u, signed=False):
+                if pd.isna(v):
+                    return "n/a"
+                if u == "pct":
+                    return ("{:+.0f} pp" if signed else "{:.0f}%").format(100 * v)
+                return ("{:+,.1f}" if signed else "{:,.1f}").format(v)
+
+            dcols = st.columns(len(ICHOM_HEADLINE))
+            for (dom, what, items), dc in zip(ICHOM_HEADLINE, dcols):
+                box = dc.container(border=True)
+                box.markdown("**{}**<br><span style='font-size:0.8rem;color:#6b7280'>{}</span>".format(
+                    dom, what), unsafe_allow_html=True)
+                for src, c, lab, u, worse in items:
+                    v0, v = val(src, c, 0), val(src, c, hsel)
+                    ex = v - v0
+                    bad = (ex > 0) == worse
+                    colr = "#b3261e" if bad else "#2e7d5b"
+                    if us_mode:
+                        n = births_b[hsel] if hsel != "all" else sum(births_b[g] for g in groups)
+                        if src == "life" and u == "pct":
+                            # a share of adults alive at 25: count it among births
+                            ex = (v * val("life", "share_reach_25", hsel) -
+                                  v0 * val("life", "share_reach_25", 0))
+                        lab = {"LE": "Life-years", "FIRST_EDUC3": "College graduates by 25"}.get(c, lab)
+                        main = agg_fmt(ex * n, "n", signed=True) + (" people" if u == "pct" else
+                                                                    " years" if u == "yr" else " QALYs")
+                        sub = "excess, one year of U.S. births"
+                    else:
+                        main = one(v, u)
+                        sub = "<span style='color:{}'>{}</span> vs. no CHD ({})".format(
+                            colr, one(ex, u, signed=True), one(v0, u))
+                    box.markdown(
+                        "<div style='font-size:0.8rem;color:#374151;margin-top:0.4rem'>{}</div>"
+                        "<div style='font-size:1.35rem;font-weight:600;line-height:1.3'>{}</div>"
+                        "<div style='font-size:0.8rem;color:#6b7280'>{}</div>".format(lab, main, sub),
+                        unsafe_allow_html=True)
+            st.caption("Per child born. Childhood years are counted from birth to 17, including "
+                       "children who die young. \"All CHD\" averages the three severities by their "
+                       "share of births. ICHOM outcomes the model does not cover: growth, heart "
+                       "failure, arrhythmias, and life satisfaction.")
+
+            # ---- Every number, collapsed
+            def burden_table(spec, src="life"):
+                t = bl if src == "life" else ch_b
                 rows_b = []
-                for c, lab, u in spec:
-                    if c not in bl.columns:
+                for dom, c, lab, u in spec:
+                    if c not in t.columns:
                         continue
                     if us_mode:
                         uu = "n" if u == "pct" else u
                         lab2 = lab.replace(" (%)", " (children)") if u == "pct" else lab
                         if c == "LE":
                             lab2 = "Life-years"
-                        row = {"Outcome": lab2}
+                        row = {"Domain": dom, "Outcome": lab2}
                         for h in groups:
                             row[HS_LABELS[h] + ": excess"] = agg_fmt(
-                                (bl.loc[h, c] - bl.loc[0, c]) * births_b[h], uu, signed=True)
+                                (t.loc[h, c] - t.loc[0, c]) * births_b[h], uu, signed=True)
                         row["All CHD: excess"] = agg_fmt(sum(
-                            (bl.loc[h, c] - bl.loc[0, c]) * births_b[h] for h in groups), uu, signed=True)
+                            (t.loc[h, c] - t.loc[0, c]) * births_b[h] for h in groups), uu, signed=True)
                     else:
-                        row = {"Outcome": lab, "No CHD": life_fmt(bl.loc[0, c], u)}
+                        row = {"Domain": dom, "Outcome": lab, "No CHD": life_fmt(t.loc[0, c], u)}
                         for h in groups:
-                            row[HS_LABELS[h]] = life_fmt(bl.loc[h, c], u)
-                            row[HS_LABELS[h] + ": excess"] = life_fmt(bl.loc[h, c] - bl.loc[0, c], u,
+                            row[HS_LABELS[h]] = life_fmt(t.loc[h, c], u)
+                            row[HS_LABELS[h] + ": excess"] = life_fmt(t.loc[h, c] - t.loc[0, c], u,
                                                                       signed=True)
                     rows_b.append(row)
                 return pd.DataFrame(rows_b)
 
-            st.markdown("**U.S. births per year, excess over no CHD**" if us_mode else "**Per child born**")
-            t1 = burden_table(LIFE_PER_BIRTH)
-            st.dataframe(t1, width="stretch", hide_index=True, height=35 * (len(t1) + 1) + 3)
+            def show(tbl):
+                st.dataframe(tbl, width="stretch", hide_index=True, height=35 * (len(tbl) + 1) + 3)
+
+            st.markdown("#### All outcomes")
+            child_spec = [(dom, c, cumulative_label(c), "pct" if c == "died_before_18" else "yr")
+                          for dom, cs in ICHOM_CHILD for c in cs]
+            # died_before_18 is a share; life_fmt shows "pct" units as percentages
+            with st.expander("Childhood, birth to 17, by ICHOM domain"):
+                show(burden_table(child_spec, "child"))
+                st.caption("Years with each condition from birth to 17, per child born. Excess shares "
+                           "are in percentage points.")
+            per = "U.S. births per year, excess over no CHD" if us_mode else "per child born"
+            with st.expander("Lifetime, " + per):
+                show(burden_table([(LIFE_DOMAIN.get(c, "Costs"), c, l, u) for c, l, u in LIFE_PER_BIRTH]))
             if not us_mode:
-                st.markdown("**Per adult alive at 25**")
-                t2 = burden_table(LIFE_PER_ADULT)
-                st.dataframe(t2, width="stretch", hide_index=True, height=35 * (len(t2) + 1) + 3)
+                with st.expander("Lifetime, per adult alive at 25"):
+                    show(burden_table([(LIFE_DOMAIN.get(c, "Costs"), c, l, u)
+                                       for c, l, u in LIFE_PER_ADULT]))
             st.caption(
                 "Dollars and discounted QALYs are discounted at 3% to birth, except medical spending "
                 "per adult, which is discounted to age 25. Childhood insurer payments come from claims "
-                "and adult medical spending from FAM, so they are different measures. Excess shares "
-                "are in percentage points. Children without CHD continue after 25 as PSID adults with "
-                "no childhood heart problem. Point estimates; the What if? tab shows intervals for "
+                "and adult medical spending from FAM, so they are different measures. \"Costs\" are not "
+                "an ICHOM domain. Children without CHD continue after 25 as PSID adults with no "
+                "childhood heart problem. Point estimates; the What if? tab shows intervals for "
                 "changes.")
 
             st.markdown("#### Survival from birth")
@@ -1373,7 +1485,7 @@ if tab_life is not None:
         # Headline tiles, one row per group
         tiles = [(c, lab, u) for c, lab, u in [
             ("LE", "Life expectancy (years)", "yr"),
-            ("WVAS_LIFETIME", "Lifetime QALYs (VAS)", "q"),
+            ("WVAS_LIFETIME", "Lifetime QALYs (GRACE)", "q"),
             ("TOTPAY_0_24", "Childhood insurer payments", "usd")] if c in dmean.columns]
         for h in hs_l:
             if h not in dmean.index:
