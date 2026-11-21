@@ -10,8 +10,8 @@ Reads the tidy files that collect_app_data.py writes on the server
     app_data/survival_by_rep.csv   (optional)
     app_data/cumulative_by_age_by_rep.csv   (optional)
     app_data/meta.json
-    app_data/lifetime_summary.csv   (optional; Lifetime tab)
-    app_data/lifetime_diff.csv      (optional; Lifetime tab)
+    app_data/lifetime_summary.csv   (optional; burden and What if? tabs)
+    app_data/lifetime_diff.csv      (optional; What if? tab)
 
 Run locally with:  streamlit run app.py
 """
@@ -560,8 +560,12 @@ def cost_note(suffix=""):
             "_mcaid": "Claims costs are priced as if every child had Medicaid (fee-for-service)."
             }[suffix]
 
-st.title("Congenital heart disease across the life course")
-st.caption(
+LOGO = Path(__file__).parent / "usc_schaeffer_logo.png"
+_t_col, _l_col = st.columns([4, 1], vertical_alignment="center")
+_t_col.title("Congenital heart disease across the life course")
+if LOGO.exists():
+    _l_col.image(str(LOGO), width="stretch")
+_t_col.caption(
     "Microsimulation of children born with and without CHD, by severity, from birth to death. "
     "Values are weighted to NSCH births and averaged over {} Monte Carlo replications.".format(
         meta.get("nsim", "?"))
@@ -594,14 +598,19 @@ USE_PRICES = pd.read_csv(_vp) if _vp.exists() else None
 COSTS_RAW = _raw[2]   # with the _comm / _mcaid columns (the payer views drop them)
 HAS_USE = (USE_PRICES is not None and COSTS_RAW is not None and surv is not None
            and "n_inpatient_visits_mcaid" in COSTS_RAW.columns)
-tab_names = ["About"] + (["Lifetime"] if LIFE is not None else []) + \
-            (["Health care use"] if HAS_USE else []) + \
-            ["Baseline (0-17)", "Interventions (0-17)", "By age (0-24)"]
+# Order of the story: what the model is, how heavy the burden is, what could
+# change it; the childhood-only detail sits last for analysts.
+tab_names = ["About"] + (["The burden of CHD", "What if?"] if LIFE is not None else []) + \
+            (["Health care use"] if HAS_USE else []) + ["Details"]
 _tabs = dict(zip(tab_names, st.tabs(tab_names)))
-tab_about, tab_base, tab_iv, tab_age = (_tabs["About"], _tabs["Baseline (0-17)"],
-                                        _tabs["Interventions (0-17)"], _tabs["By age (0-24)"])
-tab_life = _tabs.get("Lifetime")
+tab_about = _tabs["About"]
+tab_burden = _tabs.get("The burden of CHD")
+tab_life = _tabs.get("What if?")
 tab_use = _tabs.get("Health care use")
+with _tabs["Details"]:
+    st.caption("Childhood detail: outcomes from birth to 18, interventions on them, and profiles by "
+               "age through 24.")
+    tab_base, tab_iv, tab_age = st.tabs(["Baseline (0-17)", "Interventions (0-17)", "By age (0-24)"])
 
 # ---------------------------------------------------------------------
 # About (landing page)
@@ -620,10 +629,17 @@ with tab_about:
         "and medical spending, separately for children born with **mild**, **moderate**, or "
         "**severe** CHD and children born **without CHD**.\n\n"
         "The **childhood model** covers birth through age 17, with survival and costs through "
-        "age 24 (the Baseline, Interventions and By age tabs). The **Lifetime** tab follows the "
-        "same children into adulthood: each child alive at 25 is matched to adults in the Panel "
-        "Study of Income Dynamics (PSID) who were simulated from age 25 to death in the Future "
-        "Adult Model (FAM), so childhood and adult interventions can be combined."
+        "age 24. Each child alive at 25 is then matched to adults in the Panel Study of Income "
+        "Dynamics (PSID) who were simulated from age 25 to death in the Future Adult Model (FAM), "
+        "so results run from birth to death.\n\n"
+        "- **The burden of CHD** compares children born with CHD to children born without it, "
+        "over a lifetime, per child and for a year of U.S. births.\n"
+        "- **What if?** asks how much of that burden could change: if severe CHD carried the risks "
+        "of a milder form, or if childhood or adult risks were reduced.\n"
+        "- **Health care use** shows what fewer hospitalizations, ED visits or clinic visits "
+        "would save.\n"
+        "- **Details** has the childhood model on its own: outcomes from birth to 18, "
+        "interventions on them, and profiles by age."
     )
 
     st.markdown("#### How it works")
@@ -699,7 +715,7 @@ with tab_about:
         "pattern.\n"
         "- **Ages 18 to 24** carry mortality and costs forward. Other outcomes stop at 17.\n"
         "- **Uncertainty shown is partial.** In the childhood tabs, intervals reflect random "
-        "variation across replications. In the Lifetime tab they also include uncertainty from the "
+        "variation across replications. In the What if? tab they also include uncertainty from the "
         "small pool of PSID adults with childhood heart conditions. Neither includes uncertainty in "
         "the estimated model parameters, so both understate total uncertainty."
     )
@@ -733,8 +749,8 @@ with tab_about:
         "The model also tracks outcomes that ICHOM does not include as patient outcomes but that "
         "matter for costs and planning: **ER and specialist visits, special health care needs, and "
         "medical spending**. ICHOM's adult outcomes (adult quality of life, work productivity, "
-        "adult depression and anxiety, cognition, pregnancy) are partly covered in the Lifetime "
-        "tab through the Future Adult Model (work and earnings, severe psychological distress)."
+        "adult depression and anxiety, cognition, pregnancy) are partly covered in the lifetime "
+        "results through the Future Adult Model (work and earnings, severe psychological distress)."
     )
     _exp_ichom.caption("ICHOM Congenital Heart Disease Standard Set, version 1.0, April 2020. "
                "[ichom.org](https://www.ichom.org/portfolio/congenital-heart-disease/)")
@@ -1081,6 +1097,132 @@ with tab_age:
             st.caption("Weighted prevalence at each age, as in the NSCH validation tables.")
 
 # ---------------------------------------------------------------------
+# The burden of CHD (baseline, lifetime): CHD groups vs. no CHD
+# ---------------------------------------------------------------------
+BURDEN_TILES = [("LE", "Life expectancy (years)", "yr", False),
+                ("WVAS_LIFETIME", "Lifetime QALYs (VAS)", "q", False),
+                ("TOTPAY_0_24", "Insurer payments, ages 0-24", "usd", True),
+                ("TOTMD_DIS_PB", "Medical spending from 25, discounted", "usd", True),
+                ("IEARN_DIS_PB", "Lifetime earnings, discounted", "usd", False)]
+
+if tab_burden is not None:
+    with tab_burden:
+        lv_b = LIFE[0]
+        st.subheader("The burden of CHD over a lifetime")
+        st.markdown(
+            "Children born with CHD, by severity, compared with children born without it, from "
+            "birth to death. Each value is per child born, so children who die young count what "
+            "they lived. The **excess** is the difference from children without CHD.")
+        b_cols = [c for c, _, _ in LIFE_PER_BIRTH + LIFE_PER_ADULT if c in lv_b.columns]
+        bl = life_at(lv_b, [("baseline", 1.0)], [("chd_base", 1.0)], b_cols)
+        births_b = us_births(meta)
+        b_basis = st.radio("Show", ["Per child born"] + (["U.S. births per year"] if births_b else []),
+                           horizontal=True, key="burden_basis",
+                           help="U.S. births per year multiplies the excess per child by the number "
+                                "born with each severity in a year.")
+        us_mode = b_basis.startswith("U.S.")
+        groups = [h for h in CHD_STATES if h in bl.index]
+        tiles_b = [t for t in BURDEN_TILES if t[0] in bl.columns]
+
+        if 0 in bl.index:
+            if not us_mode:
+                tc = st.columns([1.2] + [2] * len(tiles_b))
+                tc[0].markdown("<div style='padding-top:1.6rem;font-weight:600;color:{}'>No CHD</div>"
+                               .format(HS_COLORS[0]), unsafe_allow_html=True)
+                for i, (c, lab, u, _) in enumerate(tiles_b):
+                    tc[i + 1].metric(lab, life_fmt(bl.loc[0, c], u))
+            for h in groups:
+                tc = st.columns([1.2] + [2] * len(tiles_b))
+                tc[0].markdown("<div style='padding-top:1.6rem;font-weight:600;color:{}'>{}</div>"
+                               .format(HS_COLORS[h], HS_LABELS[h]), unsafe_allow_html=True)
+                for i, (c, lab, u, cost) in enumerate(tiles_b):
+                    ex = bl.loc[h, c] - bl.loc[0, c]
+                    if us_mode:
+                        lab2 = "Life-years" if c == "LE" else lab
+                        tc[i + 1].metric(lab2 + ", excess", agg_fmt(ex * births_b[h], u, signed=True))
+                    else:
+                        tc[i + 1].metric(lab, life_fmt(bl.loc[h, c], u), life_fmt(ex, u, signed=True),
+                                         delta_color="inverse" if cost else "normal")
+            if us_mode:
+                tot = st.columns([1.2] + [2] * len(tiles_b))
+                tot[0].markdown("<div style='padding-top:1.6rem;font-weight:600'>All CHD</div>",
+                                unsafe_allow_html=True)
+                for i, (c, lab, u, _) in enumerate(tiles_b):
+                    lab2 = "Life-years" if c == "LE" else lab
+                    tot[i + 1].metric(lab2 + ", excess", agg_fmt(
+                        sum((bl.loc[h, c] - bl.loc[0, c]) * births_b[h] for h in groups), u, signed=True))
+                st.markdown("**U.S. births per year** (2025): " + " · ".join(
+                    "{} {:,.0f}".format(HS_LABELS[h].lower(), births_b[h]) for h in groups) +
+                    ", from {:,.0f} total births and the model's NSCH-weighted severity shares.".format(
+                        US_BIRTHS))
+            else:
+                st.caption("Small figures under each value: the excess over children without CHD.")
+
+            st.markdown("#### All outcomes")
+
+            def burden_table(spec):
+                rows_b = []
+                for c, lab, u in spec:
+                    if c not in bl.columns:
+                        continue
+                    if us_mode:
+                        uu = "n" if u == "pct" else u
+                        lab2 = lab.replace(" (%)", " (children)") if u == "pct" else lab
+                        if c == "LE":
+                            lab2 = "Life-years"
+                        row = {"Outcome": lab2}
+                        for h in groups:
+                            row[HS_LABELS[h] + ": excess"] = agg_fmt(
+                                (bl.loc[h, c] - bl.loc[0, c]) * births_b[h], uu, signed=True)
+                        row["All CHD: excess"] = agg_fmt(sum(
+                            (bl.loc[h, c] - bl.loc[0, c]) * births_b[h] for h in groups), uu, signed=True)
+                    else:
+                        row = {"Outcome": lab, "No CHD": life_fmt(bl.loc[0, c], u)}
+                        for h in groups:
+                            row[HS_LABELS[h]] = life_fmt(bl.loc[h, c], u)
+                            row[HS_LABELS[h] + ": excess"] = life_fmt(bl.loc[h, c] - bl.loc[0, c], u,
+                                                                      signed=True)
+                    rows_b.append(row)
+                return pd.DataFrame(rows_b)
+
+            st.markdown("**U.S. births per year, excess over no CHD**" if us_mode else "**Per child born**")
+            t1 = burden_table(LIFE_PER_BIRTH)
+            st.dataframe(t1, width="stretch", hide_index=True, height=35 * (len(t1) + 1) + 3)
+            if not us_mode:
+                st.markdown("**Per adult alive at 25**")
+                t2 = burden_table(LIFE_PER_ADULT)
+                st.dataframe(t2, width="stretch", hide_index=True, height=35 * (len(t2) + 1) + 3)
+            st.caption(
+                "Dollars and discounted QALYs are discounted at 3% to birth, except medical spending "
+                "per adult, which is discounted to age 25. Childhood insurer payments come from claims "
+                "and adult medical spending from FAM, so they are different measures. Excess shares "
+                "are in percentage points. Children without CHD continue after 25 as PSID adults with "
+                "no childhood heart problem. Point estimates; the What if? tab shows intervals for "
+                "changes.")
+
+            st.markdown("#### Survival from birth")
+            s_cols_b = sorted([c for c in lv_b.columns if c.startswith("S_") and not c.endswith("sd")])
+            if s_cols_b:
+                sb_b = life_at(lv_b, [("baseline", 1.0)], [("chd_base", 1.0)], s_cols_b)
+                ages_b = [int(c[2:]) for c in s_cols_b]
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=ages_b, y=np.round(100 * sb_b.loc[0].values, 1),
+                                         mode="lines", name="No CHD",
+                                         line=dict(color="#222222", dash="dot", width=1.5),
+                                         hovertemplate="No CHD, age %{x}: %{y:.1f}%<extra></extra>"))
+                for h in groups:
+                    fig.add_trace(go.Scatter(
+                        x=ages_b, y=np.round(100 * sb_b.loc[h].values, 1), mode="lines",
+                        name=HS_LABELS[h], line=dict(color=HS_COLORS[h]),
+                        hovertemplate=HS_LABELS[h] + ", age %{x}: %{y:.1f}%<extra></extra>"))
+                fig.update_layout(xaxis_title="Age", yaxis_title="Alive at age (%)",
+                                  yaxis_range=[0, 101], xaxis_range=[0, 100],
+                                  template="plotly_white", height=450, margin=dict(t=30))
+                st.plotly_chart(fig, width="stretch")
+                st.caption("Share of each birth cohort alive at each age. Birth to 24: childhood "
+                           "model; 25 on: FAM.")
+
+# ---------------------------------------------------------------------
 # Lifetime
 # ---------------------------------------------------------------------
 if tab_life is not None:
@@ -1088,7 +1230,10 @@ if tab_life is not None:
         lv_all, df_all = LIFE
         nsim = meta.get("nsim", 1)
         has_boot = any(c.endswith("_bootsd") for c in df_all.columns)
-        st.subheader("Lifetime outcomes: childhood and adult interventions combined")
+        st.subheader("What if? Changing the risks that drive the burden")
+        st.markdown("Start with the bounds: how much would change if severe CHD carried the risks of a "
+                    "milder form. Then try realistic reductions in single childhood or adult risks, "
+                    "alone or combined. Every result is compared with the same children's baseline.")
 
         child_ivs = [iv for iv in lv_all.loc[lv_all["child_kind"] == "intervention", "child_iv"].unique()
                      if not zero_effect(df_all, iv)]
@@ -1101,7 +1246,7 @@ if tab_life is not None:
         l1, l2 = st.columns(2)
         with l1:
             st.markdown("**Childhood (birth to 24)**")
-            kind = st.radio("Type", ["Intervention", "Severity counterfactual"], horizontal=True,
+            kind = st.radio("Type", ["Severity counterfactual", "Intervention"], horizontal=True,
                             key="life_kind",
                             help="A severity counterfactual simulates children born with severe CHD "
                                  "as if they had a milder form (or only its mortality), and applies "
@@ -1128,7 +1273,7 @@ if tab_life is not None:
                         c_desc = "{} risk reduced {:g}%".format(c_label.lower(), cx)
             else:
                 cf = st.selectbox("Counterfactual", cfs, format_func=lambda k: CF_LABELS[k],
-                                  key="life_cf")
+                                  key="life_cf", index=cfs.index("as_none") if "as_none" in cfs else 0)
                 child_w = [("sev_{}_baseline".format(cf), 1.0)]
                 c_desc = CF_LABELS[cf].lower()
         with l2:
@@ -1144,7 +1289,9 @@ if tab_life is not None:
                 fam_w = weights(fg, fx)
                 f_desc = "{} risk reduced {:g}%".format(f_label.lower(), fx)
 
-        hs_l = group_picker("life_groups", CHD_STATES)
+        # Counterfactuals change the severe group only, so show it alone by default.
+        hs_l = (group_picker("life_groups", CHD_STATES) if kind == "Intervention"
+                else group_picker("life_groups_cf", [4]))
         st.info("**Scenario:** {}; {}.".format(c_desc, f_desc))
 
         outcomes = [(c, l, u, "birth") for c, l, u in LIFE_PER_BIRTH if c in df_all.columns] + \
