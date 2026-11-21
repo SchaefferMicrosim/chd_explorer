@@ -127,14 +127,18 @@ def rnd(v, col):
     return np.round(v, -2) if is_dollar(col) else np.round(v, decimals(col))
 
 
-def fmt(v, col, signed=False):
+def fmt(v, col, signed=False, extra=0):
+    """extra: additional decimals, used for changes so a small change that is
+    real does not print as +0.00 next to a nonzero percent change."""
     if pd.isna(v):
         return "n/a"
-    v = float(rnd(v, col))
     if is_dollar(col):
+        v = float(rnd(v, col))
         sign = ("+" if v >= 0 else "-") if signed else ("-" if v < 0 else "")
         return "{}${:,.0f}".format(sign, abs(v))
-    return ("{:+,.%df}" % decimals(col) if signed else "{:,.%df}" % decimals(col)).format(v)
+    d = decimals(col) + extra
+    v = float(np.round(v, d))
+    return ("{:+,.%df}" % d if signed else "{:,.%df}" % d).format(v)
 
 
 def hover_y(col):
@@ -294,14 +298,14 @@ def means_at(data, grid, x, col, keys):
     return ((1 - t) * m0 + t * m1).reset_index()
 
 
-def intensity_input(grid, key, label="Reduction in risk (%)"):
-    """Continuous intensity, bounded by the simulated grid (no extrapolation)."""
+def intensity_input(grid, key, label="Reduction in risk (%)", default=10.0):
+    """Continuous intensity slider, bounded by the simulated grid (no extrapolation)."""
     pts = [p for p, _ in grid]
     hi = float(pts[-1])
-    x = st.number_input(label, min_value=0.0, max_value=hi, value=min(10.0, hi),
-                        step=0.25, format="%.2f", key=key)
-    st.caption("Simulated at {}%. Values in between are linearly interpolated; values above "
-               "{:g}% are not available.".format(", ".join("{:g}".format(p) for p in pts[1:]), hi))
+    x = st.slider(label, min_value=0.0, max_value=hi, value=min(float(default), hi),
+                  step=1.0, format="%.0f%%", key=key)
+    st.caption("Simulated at {}%; in between, results are interpolated.".format(
+        ", ".join("{:g}".format(p) for p in pts[1:])))
     return x
 
 
@@ -598,6 +602,8 @@ FLOW_SVG = Path(__file__).parent / "model_flow.svg"   # rendered from model_flow
 
 
 with tab_about:
+  about_col, _ = st.columns([3, 1])
+  with about_col:
     st.subheader("About this model")
     st.markdown(
         "This explorer shows results from a microsimulation of children born in the United States "
@@ -635,8 +641,7 @@ with tab_about:
 
     st.markdown("#### The model runs in a fixed order")
     if FLOW_SVG.exists():
-        flow_col, _ = st.columns([6, 1])
-        flow_col.image(str(FLOW_SVG), width="stretch")
+        st.image(str(FLOW_SVG), width="stretch")
     st.markdown(
         "Each child starts with a set of **initial conditions** drawn at birth. Some are known "
         "right away; others, such as an eventual anxiety or depression diagnosis, are drawn at "
@@ -659,8 +664,8 @@ with tab_about:
         "interventions also do, because more children are alive and receiving care."
     )
 
-    st.markdown("#### What the model is, and what it isn't")
-    st.markdown(
+    _exp_is = st.expander("What the model is, and what it isn't")
+    _exp_is.markdown(
         "- **The relationships are associations, not proven causal effects.** They come from survey "
         "data. An intervention result answers the question: *if this risk were lower, and "
         "everything downstream responded as the estimated relationships imply, what would change?*\n"
@@ -677,13 +682,14 @@ with tab_about:
         "is priced like any other year. Insurance coverage after 17 is held at its age 14-17 "
         "pattern.\n"
         "- **Ages 18 to 24** carry mortality and costs forward. Other outcomes stop at 17.\n"
-        "- **Uncertainty shown is simulation noise only.** The intervals reflect random variation "
-        "across replications. They do not include uncertainty in the estimated model parameters, "
-        "so they understate total uncertainty."
+        "- **Uncertainty shown is partial.** In the childhood tabs, intervals reflect random "
+        "variation across replications. In the Lifetime tab they also include uncertainty from the "
+        "small pool of PSID adults with childhood heart conditions. Neither includes uncertainty in "
+        "the estimated model parameters, so both understate total uncertainty."
     )
 
-    st.markdown("#### How the outcomes relate to the ICHOM Standard Set")
-    st.markdown(
+    _exp_ichom = st.expander("How the outcomes relate to the ICHOM Standard Set")
+    _exp_ichom.markdown(
         "The International Consortium for Health Outcomes Measurement (ICHOM) Standard Set for "
         "Congenital Heart Disease defines the outcomes that matter most to patients and families, "
         "in four domains. The table shows where the simulated childhood outcomes fit. The model's "
@@ -702,19 +708,19 @@ with tab_about:
         ["Social health", "Productivity (school days missed)", "School absence; low grades", "Yes"],
         ["Social health", "Family quality of life", "Parent stopped working", "Partial"],
         ["Social health", "Financial burden",
-         "Affording essentials; access to care; out-of-pocket costs", "Yes"],
+         "Affording essentials; access to care", "Partial"],
         ["Mental health", "Development (mental health diagnoses)",
          "Anxiety; depression; behavioral problems", "Yes"],
     ], columns=["ICHOM domain", "ICHOM outcome", "Model outcomes", "Coverage"])
-    st.dataframe(ichom_map, width="stretch", hide_index=True)
-    st.markdown(
+    _exp_ichom.dataframe(ichom_map, width="stretch", hide_index=True)
+    _exp_ichom.markdown(
         "The model also tracks outcomes that ICHOM does not include as patient outcomes but that "
         "matter for costs and planning: **ER and specialist visits, special health care needs, and "
         "medical spending**. ICHOM's adult outcomes (adult quality of life, work productivity, "
-        "adult depression and anxiety, cognition, pregnancy) belong to the adult part of the "
-        "life-course model and are not shown here."
+        "adult depression and anxiety, cognition, pregnancy) are partly covered in the Lifetime "
+        "tab through the Future Adult Model (work and earnings, severe psychological distress)."
     )
-    st.caption("ICHOM Congenital Heart Disease Standard Set, version 1.0, April 2020. "
+    _exp_ichom.caption("ICHOM Congenital Heart Disease Standard Set, version 1.0, April 2020. "
                "[ichom.org](https://www.ichom.org/portfolio/congenital-heart-disease/)")
 
     st.markdown("#### Reading the results")
@@ -772,8 +778,7 @@ with tab_base:
     ))
     fig.update_layout(yaxis_title=choice, template="plotly_white", height=400,
                       margin=dict(t=30), bargap=0.6)
-    chart_col, _ = st.columns([1, 1])
-    chart_col.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, width="stretch")
     if col.startswith("total_"):
         st.caption(cost_note(base_payer))
 
@@ -881,7 +886,8 @@ with tab_iv:
                              "% change": round(r["pct"], 1)})
                 shown.append({"Outcome": cumulative_label(c), "Group": HS_LABELS.get(h, h),
                               "Baseline": fmt(vals[0], c), "With intervention": fmt(vals[1], c),
-                              "Change": fmt(vals[2], c, signed=True), "95% MC ±": fmt(vals[3], c),
+                              "Change": fmt(vals[2], c, signed=True, extra=1),
+                              "95% MC ±": fmt(vals[3], c, extra=1),
                               "% change": "n/a" if pd.isna(r["pct"]) else "{:+.1f}%".format(r["pct"])})
         tbl = pd.DataFrame(rows)
         if len(tbl):
@@ -923,7 +929,8 @@ def show_survival(iv_label_s, hs_s):
         if mode_s == "Survival":
             fig.add_trace(go.Scatter(
                 x=sub["age"], y=100 * sub["base"], mode="lines", name=HS_LABELS[h],
-                line=dict(color=HS_COLORS[h]),
+                line=(dict(color="#222222", dash="dot", width=1.5) if h == 0
+                      else dict(color=HS_COLORS[h])),
                 hovertemplate=HS_LABELS[h] + ", age %{x}: %{y:.1f}%<extra></extra>"))
             if x_s > 0:
                 fig.add_trace(go.Scatter(
@@ -938,11 +945,14 @@ def show_survival(iv_label_s, hs_s):
                 error_y=dict(type="data", array=100 * sub["hw"]),
                 hovertemplate=HS_LABELS[h] + ", age %{x}: %{y:+.1f} pp<extra></extra>"))
     if mode_s == "Survival":
-        fig.update_layout(yaxis_title="Alive at age (%)", yaxis_range=[0, 101])
+        lo = 100 * eff_s.loc[eff_s["heart_state"].isin(hs_s), ["base", "level"]].min().min()
+        fig.update_layout(yaxis_title="Alive at age (%)",
+                          yaxis_range=[max(0.0, 5 * np.floor((lo - 2) / 5)), 100.5])
     else:
         fig.update_layout(yaxis_title="Change in % alive (percentage points)")
         fig.add_hline(y=0, line_color="#bbbbbb", line_width=1)
-    fig.update_layout(xaxis_title="Age", template="plotly_white", height=470, margin=dict(t=30))
+    fig.update_layout(xaxis_title="Age", xaxis_range=[0, 24], template="plotly_white", height=470,
+                      margin=dict(t=30))
     st.plotly_chart(fig, width="stretch")
 
     milestones = [a for a in (1, 5, 18, 24) if a in set(eff_s["age"])]
@@ -1081,7 +1091,9 @@ if tab_life is not None:
                                  "as if they had a milder form (or only its mortality), and applies "
                                  "to the severe group only.") if cfs else "Intervention"
             if kind == "Intervention":
-                c_label = st.selectbox("Intervention", ["(none)"] + list(child_lab), key="life_civ")
+                c_opts = ["(none)"] + list(child_lab)
+                c_label = st.selectbox("Intervention", c_opts, key="life_civ",
+                                       index=c_opts.index("Mortality") if "Mortality" in c_opts else 0)
                 if c_label == "(none)":
                     child_w, c_desc = [("baseline", 1.0)], "no childhood intervention"
                 else:
@@ -1095,7 +1107,7 @@ if tab_life is not None:
                     if use_cure:
                         child_w, c_desc = [(cure, 1.0)], "{} eliminated".format(c_label.lower())
                     else:
-                        cx = intensity_input(cg, key="life_cx")
+                        cx = intensity_input(cg, key="life_cx", default=30.0)
                         child_w = weights(cg, cx)
                         c_desc = "{} risk reduced {:g}%".format(c_label.lower(), cx)
             else:
@@ -1117,9 +1129,7 @@ if tab_life is not None:
                 f_desc = "{} risk reduced {:g}%".format(f_label.lower(), fx)
 
         hs_l = group_picker("life_groups", CHD_STATES)
-        st.markdown("**Scenario:** {}; {}.".format(c_desc, f_desc))
-        st.caption("Childhood interventions were simulated at 10, 20 and 30% (plus elimination); "
-                   "adult interventions at 10 to 70%.")
+        st.info("**Scenario:** {}; {}.".format(c_desc, f_desc))
 
         outcomes = [(c, l, u, "birth") for c, l, u in LIFE_PER_BIRTH if c in df_all.columns] + \
                    [(c, l, u, "adult") for c, l, u in LIFE_PER_ADULT if c in df_all.columns]
@@ -1137,15 +1147,18 @@ if tab_life is not None:
         births = us_births(meta)
         bases = ["Per child born"]
         if cases is not None:
-            bases.append("Per {} ".format(cases["unit"]) + "prevented" if civ_sel != "mort"
-                         else "Per death averted before 25")
+            bases.append("Per death averted before 25" if civ_sel == "mort" else "Per case prevented")
         if births is not None:
             bases.append("U.S. births per year")
-        basis = st.radio("Show results", bases, horizontal=True, key="life_basis",
+        b1, b2 = st.columns([3, 2])
+        basis = b1.radio("Show results", bases, horizontal=True, key="life_basis",
                          help="Per child born averages over every child in the group, including those "
                               "the intervention never reaches. Per case prevented divides that by "
                               "the share of children whose outcome the intervention changes. U.S. "
                               "births per year multiplies it by the number born in the group each year.")
+        wtp = b2.select_slider("Value of one QALY", options=[50000, 100000, 150000, 200000],
+                               value=100000, format_func=lambda v: "${:,.0f}".format(v),
+                               key="life_wtp")
         mode = "birth" if basis == "Per child born" else ("us" if basis.startswith("U.S.") else "case")
 
         def factor(h):
@@ -1157,52 +1170,87 @@ if tab_life is not None:
             return 1.0
 
         if mode == "case":
-            for h in hs_l:
-                d = cases["dp"].get(h, np.nan)
-                if not (d and d > 1e-9):
-                    continue
-                q = dmean.loc[h, "WVAS_LIFETIME"] if "WVAS_LIFETIME" in dmean.columns else np.nan
-                msg = ("**{}:** {} {} in {:.1f} of every 100 children born. {} "
-                       "gains {} lifetime QALYs".format(
-                           HS_LABELS[h], cases["verb"], cases["what"], 100 * d,
-                           "Each death averted" if civ_sel == "mort" else "Each prevented case",
-                           life_fmt(q / d, "q", True)))
-                if "TOTPAY_0_24" in dmean.columns and abs(dmean.loc[h, "TOTPAY_0_24"]) > 1:
-                    msg += " and changes childhood insurer payments by {}".format(
-                        life_fmt(dmean.loc[h, "TOTPAY_0_24"] / d, "usd", True))
-                msg += "; averaged over all 100 births, that is {} QALYs per child born.".format(
-                    life_fmt(q, "q", True))
-                st.markdown(msg)
+            what = "deaths before 25 averted" if civ_sel == "mort" else "cases of {} prevented".format(
+                cases["what"])
+            st.markdown("**{} per 100 children born:** ".format(what[:1].upper() + what[1:]) +
+                        " · ".join("{} {:.1f}".format(HS_LABELS[h].lower(), 100 * cases["dp"][h])
+                                   for h in hs_l if cases["dp"].get(h, 0) > 1e-9) +
+                        ". Results below are the change per child born divided by these shares.")
         elif mode == "us":
-            st.markdown("Based on {:,.0f} U.S. births in 2025: ".format(US_BIRTHS) + "; ".join(
-                "{} about {:,.0f}".format(HS_LABELS[h].lower(), births[h]) for h in hs_l if h in births)
-                + " per year.")
+            st.markdown("**U.S. births per year** (2025): " + " · ".join(
+                "{} {:,.0f}".format(HS_LABELS[h].lower(), births[h]) for h in hs_l if h in births) +
+                ", from {:,.0f} total births and the model's NSCH-weighted severity shares.".format(
+                    US_BIRTHS))
 
-        rows = []
-        for c, lab, u, per in outcomes:
-            if mode != "birth" and (per == "adult" or (mode == "case" and c == "share_reach_25")):
+        fm_ = agg_fmt if mode == "us" else life_fmt
+        health, costs_l = "WVAS_LIFETIME_DIS", ["TOTPAY_0_24_DIS", "TOTMD_DIS_PB"]
+        has_nmb = health in dmean.columns and all(c in dmean.columns for c in costs_l)
+
+        def nmb_of(h):
+            f = factor(h)
+            dq, dc = dmean.loc[h, health] * f, sum(dmean.loc[h, c] for c in costs_l) * f
+            return dq, dc, wtp * dq - dc
+
+        # Headline tiles, one row per group
+        tiles = [(c, lab, u) for c, lab, u in [
+            ("LE", "Life expectancy (years)", "yr"),
+            ("WVAS_LIFETIME", "Lifetime QALYs (VAS)", "q"),
+            ("TOTPAY_0_24", "Childhood insurer payments", "usd")] if c in dmean.columns]
+        for h in hs_l:
+            if h not in dmean.index:
                 continue
-            uu = "n" if (mode == "us" and u == "pct") else u
-            for h in hs_l:
-                if h not in dmean.index:
-                    continue
-                f = factor(h)
-                hw = life_halfwidth(dsd.loc[h, c + "_sd"],
-                                    None if dbs is None else dbs.loc[h, c + "_bootsd"], nsim)
-                row = {"Outcome": lab if not (mode == "us" and u == "pct")
-                       else lab.replace(" (%)", " (children)"), "Group": HS_LABELS[h]}
+            f = factor(h)
+            tc = st.columns([1.2] + [2] * (len(tiles) + int(has_nmb)))
+            tc[0].markdown("<div style='padding-top:1.6rem;font-weight:600;color:{}'>{}</div>".format(
+                HS_COLORS[h], HS_LABELS[h]), unsafe_allow_html=True)
+            for i, (c, lab, u) in enumerate(tiles):
+                inv = "inverse" if u == "usd" else "normal"
                 if mode == "birth":
-                    row = {"Per": "Child born" if per == "birth" else "Adult alive at 25", **row,
-                           "Baseline": life_fmt(base_lv.loc[h, c], u),
-                           "With interventions": life_fmt(scen_lv.loc[h, c], u)}
-                elif mode == "us":
-                    row.update({"Baseline": agg_fmt(base_lv.loc[h, c] * f, uu),
-                                "With interventions": agg_fmt(scen_lv.loc[h, c] * f, uu)})
-                fmt_ = life_fmt if mode != "us" else agg_fmt
-                row.update({"Change": fmt_(dmean.loc[h, c] * f, uu, signed=True),
-                            "95% ±": fmt_(hw * abs(f), uu)})
-                rows.append(row)
-        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True, height=420)
+                    tc[i + 1].metric(lab, life_fmt(scen_lv.loc[h, c], u),
+                                     life_fmt(dmean.loc[h, c], u, signed=True), delta_color=inv)
+                else:
+                    lab2 = "Life-years" if c == "LE" else lab
+                    tc[i + 1].metric(lab2 + (" per case" if mode == "case" else ", U.S. total"),
+                                     fm_(dmean.loc[h, c] * f, u, signed=True))
+            if has_nmb:
+                tc[-1].metric("Net monetary benefit", fm_(nmb_of(h)[2], "usd", signed=True),
+                              help="Value of the change in discounted lifetime QALYs at the QALY "
+                                   "value above, minus the change in discounted medical spending.")
+
+        # Full results: one row per outcome, columns by group
+        def table(per):
+            rows_t = []
+            for c, lab, u, p_ in outcomes:
+                if p_ != per or (mode == "case" and c == "share_reach_25"):
+                    continue
+                uu = "n" if (mode == "us" and u == "pct") else u
+                lab2 = lab.replace(" (%)", " (children)") if (mode == "us" and u == "pct") else lab
+                if mode != "birth" and c == "LE":
+                    lab2 = "Life-years"
+                row = {"Outcome": lab2}
+                for h in hs_l:
+                    if h not in dmean.index:
+                        continue
+                    f, g = factor(h), HS_LABELS[h]
+                    hw = life_halfwidth(dsd.loc[h, c + "_sd"],
+                                        None if dbs is None else dbs.loc[h, c + "_bootsd"], nsim)
+                    if mode != "case":
+                        row[g + ": baseline"] = fm_(base_lv.loc[h, c] * f, uu)
+                        row[g + ": scenario"] = fm_(scen_lv.loc[h, c] * f, uu)
+                    row[g + ": change"] = "{} ± {}".format(fm_(dmean.loc[h, c] * f, uu, signed=True),
+                                                           fm_(hw * abs(f), uu))
+                rows_t.append(row)
+            return pd.DataFrame(rows_t)
+
+        st.markdown("#### All outcomes")
+        st.markdown("**Per child born**" if mode == "birth" else
+                    ("**Per case prevented**" if mode == "case" else "**U.S. births per year**"))
+        t_b = table("birth")
+        st.dataframe(t_b, width="stretch", hide_index=True, height=35 * (len(t_b) + 1) + 3)
+        if mode == "birth":
+            st.markdown("**Per adult alive at 25**")
+            t_a = table("adult")
+            st.dataframe(t_a, width="stretch", hide_index=True, height=35 * (len(t_a) + 1) + 3)
         basis_note = {
             "birth": "Per child born counts every birth, including children who die before 25. Per "
                      "adult is the average over those alive at 25, so it can move in either direction "
@@ -1215,7 +1263,7 @@ if tab_life is not None:
             "us": "Totals for one year of U.S. births ({:,.0f} in 2025, CDC/NCHS provisional), split "
                   "by severity using the NSCH-weighted shares in the model. ".format(US_BIRTHS)}[mode]
         st.caption(
-            basis_note +
+            basis_note + "Changes are shown ± a 95% interval. "
             "Dollars and discounted QALYs are discounted at 3% to birth, except medical spending per "
             "adult, which is discounted to age 25. Childhood insurer payments come from claims and "
             "adult medical spending from FAM, so they are different measures. " +
@@ -1223,30 +1271,27 @@ if tab_life is not None:
              "with childhood heart conditions (bootstrap)." if has_boot else
              "Intervals are Monte Carlo error only; they omit uncertainty from the small pool of "
              "PSID adults with childhood heart conditions, which is larger.") +
-            " These intervals do not include uncertainty in the estimated model parameters.")
+            " These intervals do not include uncertainty in the estimated model parameters. "
+            "Childhood interventions were simulated at 10, 20 and 30% (plus elimination); adult "
+            "interventions at 10 to 70%.")
 
         # Net monetary benefit
-        st.markdown("#### Net monetary benefit, " + basis.lower().replace("show results ", ""))
-        n1, _ = st.columns([1, 2])
-        wtp = n1.number_input("Value of one QALY ($)", min_value=0, max_value=500000,
-                              value=100000, step=10000, key="life_wtp")
-        health, costs_l = "WVAS_LIFETIME_DIS", ["TOTPAY_0_24_DIS", "TOTMD_DIS_PB"]
-        if health in dmean.columns and all(c in dmean.columns for c in costs_l):
-            fm_ = agg_fmt if mode == "us" else life_fmt
+        if has_nmb:
+            st.markdown("#### Net monetary benefit")
             nmb = []
             for h in hs_l:
                 if h not in dmean.index:
                     continue
-                f = factor(h)
-                dq, dc = dmean.loc[h, health] * f, sum(dmean.loc[h, c] for c in costs_l) * f
+                dq, dc, nb = nmb_of(h)
                 nmb.append({"Group": HS_LABELS[h], "Change in discounted QALYs": fm_(dq, "q", True),
                             "Change in discounted spending": fm_(dc, "usd", True),
-                            "Net monetary benefit": fm_(wtp * dq - dc, "usd", True)})
+                            "Net monetary benefit": fm_(nb, "usd", True)})
             st.dataframe(pd.DataFrame(nmb), width="stretch", hide_index=True)
-            st.caption("Value of the QALY change minus the change in medical spending (childhood "
-                       "insurer payments plus adult medical spending), both discounted at 3% to "
-                       "birth. Program costs are not included, so this is what an intervention "
-                       "could cost, on the basis shown, and still break even. Point estimates only.")
+            st.caption("{}: the value of the QALY change at ${:,.0f} per QALY, minus the change in "
+                       "medical spending (childhood insurer payments plus adult medical spending), "
+                       "both discounted at 3% to birth. Program costs are not included, so this is "
+                       "what an intervention could cost, on that basis, and still break even. Point "
+                       "estimates only.".format(basis, wtp))
 
         # Survival
         st.markdown("#### Survival from birth")
@@ -1256,19 +1301,25 @@ if tab_life is not None:
             ss = life_at(lv_all, child_w, fam_w, s_cols)
             ages = [int(c[2:]) for c in s_cols]
             fig = go.Figure()
+            if 0 in sb.index:
+                fig.add_trace(go.Scatter(x=ages, y=np.round(100 * sb.loc[0].values, 1), mode="lines",
+                                         name="No CHD (reference)",
+                                         line=dict(color="#222222", dash="dot", width=1.5),
+                                         hovertemplate="No CHD, age %{x}: %{y:.1f}%<extra></extra>"))
             for h in hs_l:
-                if h not in sb.index:
+                if h not in sb.index or h == 0:
                     continue
                 fig.add_trace(go.Scatter(x=ages, y=np.round(100 * sb.loc[h].values, 1), mode="lines",
                                          name=HS_LABELS[h], line=dict(color=HS_COLORS[h]),
                                          hovertemplate=HS_LABELS[h] + ", age %{x}: %{y:.1f}%<extra></extra>"))
-                if not np.allclose(sb.loc[h].values, ss.loc[h].values):
+                if np.abs(sb.loc[h].values - ss.loc[h].values).max() > 0.002:
                     fig.add_trace(go.Scatter(
                         x=ages, y=np.round(100 * ss.loc[h].values, 1), mode="lines",
                         name=HS_LABELS[h] + " (scenario)", line=dict(color=HS_COLORS[h], dash="dash"),
                         hovertemplate=HS_LABELS[h] + " scenario, age %{x}: %{y:.1f}%<extra></extra>"))
             fig.update_layout(xaxis_title="Age", yaxis_title="Alive at age (%)", yaxis_range=[0, 101],
-                              template="plotly_white", height=450, margin=dict(t=30))
+                              xaxis_range=[0, 100], template="plotly_white", height=450,
+                              margin=dict(t=30))
             st.plotly_chart(fig, width="stretch")
 
         # Combination surface
@@ -1295,5 +1346,5 @@ if tab_life is not None:
                        "intensities.".format(surf_out.lower(), HS_LABELS[sh].lower()))
 
 st.divider()
-st.caption("Data generated {} on {}, revision {}.".format(
-    meta.get("generated", "?"), meta.get("host", "?"), meta.get("revision", "?")))
+st.caption("Data generated {}, revision {}.".format(
+    meta.get("generated", "?")[:10], meta.get("revision", "?")))

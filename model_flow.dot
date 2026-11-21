@@ -1,8 +1,8 @@
 
 digraph {
   graph [layout=neato, splines=true, overlap=false, fontname="Helvetica", bgcolor="transparent"];
-  node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=15, margin="0.18,0.09"];
-  edge  [color="#6b7785", arrowsize=0.7];
+  node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=16, margin="0.18,0.09"];
+  edge  [color="#6b7785", arrowsize=0.7, fontname="Helvetica", fontsize=14];
 
   init [pos="-0.6,0!", fillcolor="#e3ecf7", color="#4c9be8",
         label="Initial conditions (at birth)\n\nFixed: CHD severity, sex, race/ethnicity,\nparent education, insurance, family poverty\n\nJoint draws:\ndevelopmental delay, intellectual disability;\never diagnosed with anxiety, depression,\nor behavioral problems, and at what age\n(revealed when the child reaches that age)"];
@@ -21,17 +21,17 @@ digraph {
   par -> child;
   child -> srh;
   srh -> cost;
-  cost -> mort [label="  next age", fontsize=13, fontcolor="#6b7785", style=dashed];
+  cost -> mort [label="  next age", fontsize=14, fontcolor="#6b7785", style=dashed];
   init -> mort [penwidth=1.3];
 
   link [pos="18.30,2.60!", fillcolor="#e9f3ea", color="#4f9a5a",
         label="Age 25: link to adulthood\n\nEach child alive at 25 is matched to\nPSID adults with a childhood heart\ncondition, by sex and childhood\nself-rated health (children without\nCHD: adults without one)"];
   fam  [pos="18.30,-1.75!", fillcolor="#e9f3ea", color="#4f9a5a",
         label="Ages 25 to death: Future Adult Model\n\nchronic conditions, mortality, work,\nearnings, disability, medical spending,\nquality of life"];
-  mort -> link [penwidth=1.3, label="alive at 25\n", fontsize=13, fontcolor="#6b7785"];
+  mort -> link [penwidth=1.3, label="alive at 25\n", fontsize=14, fontcolor="#6b7785"];
   link -> fam [penwidth=1.3];
-  kidiv [pos="8.60,-4.30!", shape=plaintext, style="", fontsize=13, fontcolor="#4a5563",
+  kidiv [pos="8.60,-4.30!", shape=plaintext, style="", fontsize=15, fontcolor="#4a5563",
          label="Childhood interventions change the yearly risks above"];
-  adiv  [pos="18.30,-3.55!", shape=plaintext, style="", fontsize=13, fontcolor="#4a5563",
+  adiv  [pos="18.30,-3.55!", shape=plaintext, style="", fontsize=15, fontcolor="#4a5563",
          label="Adult interventions change\nrisks in the Future Adult Model"];
 }
