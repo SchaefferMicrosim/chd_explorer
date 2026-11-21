@@ -1153,7 +1153,7 @@ BURDEN_TILES = [("LE", "Life expectancy (years)", "yr", False),
                 ("TOTPAY_0_24", "Insurer payments, ages 0-24", "usd", True),
                 # Per adult alive at 25: per child born, fewer severe-CHD children reach 25,
                 # which outweighs their higher spending and reads as a saving.
-                ("TOTMD_DIS", "Medical spending from 25, per adult", "usd", True),
+                ("TOTMD_DIS", "Adult medical spending", "usd", True),
                 ("IEARN_DIS_PB", "Lifetime earnings, discounted", "usd", False)]
 
 if tab_burden is not None:
