@@ -17,6 +17,7 @@ Run locally with:  streamlit run app.py
 """
 
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -641,7 +642,12 @@ with tab_about:
 
     st.markdown("#### The model runs in a fixed order")
     if FLOW_SVG.exists():
-        st.image(str(FLOW_SVG), width="stretch")
+        # Inline (not st.image) so the SVG's text uses the page's web font.
+        # Collapsed to one line first: Markdown would otherwise read the
+        # indented, blank-line-separated SVG source as a code block.
+        _svg = re.sub(r"<!--.*?-->", "", FLOW_SVG.read_text(encoding="utf-8"), flags=re.S)
+        st.markdown(" ".join(line.strip() for line in _svg.splitlines() if line.strip()),
+                    unsafe_allow_html=True)
     st.markdown(
         "Each child starts with a set of **initial conditions** drawn at birth. Some are known "
         "right away; others, such as an eventual anxiety or depression diagnosis, are drawn at "
