@@ -326,6 +326,7 @@ LIFE_PER_BIRTH = [
     ("WVAS_LIFETIME", "Lifetime QALYs (VAS)", "q"),
     ("WVAS_LIFETIME_DIS", "Lifetime QALYs (VAS), discounted", "q"),
     ("WVAS_0_24", "QALYs (VAS), ages 0-24", "q"),
+    ("TOTPAY_0_24", "Insurer payments, ages 0-24", "usd"),
     ("TOTPAY_0_24_DIS", "Insurer payments, ages 0-24, discounted", "usd"),
     ("TOTMD_DIS_PB", "Medical spending, ages 25+, discounted", "usd"),
     ("MCARE_DIS_PB", "Medicare spending, ages 25+, discounted", "usd"),
@@ -372,6 +373,77 @@ def load_lifetime(stamp):
             d[c] = d[c].fillna("")
         out.append(d)
     return tuple(out)
+
+
+US_BIRTHS = 3606400   # CDC/NCHS, Births: Provisional Data for 2025 (VSRR 43)
+# What "a case" is for each childhood lever, for the per-case basis.
+CASE_WORDS = {
+    "mort": ("death before 25", "averts", "a death before 25"),
+    "dev_delay": ("case", "prevents", "developmental delay"),
+    "int_dis_modsev": ("case", "prevents", "moderate/severe intellectual disability"),
+    "anxiety": ("case", "prevents", "anxiety"),
+    "depression": ("case", "prevents", "depression"),
+    "behavioral_problems": ("case", "prevents", "behavioral problems"),
+}
+
+
+@st.cache_data
+def load_ever_share(stamp):
+    path = DATA_DIR / "ever_share.csv"
+    return pd.read_csv(path) if path.exists() else None
+
+
+def zero_effect(df_all, iv):
+    """True if a childhood lever changes no lifetime outcome for anyone (e.g.
+    spec_care once it has no pathway); such levers are hidden."""
+    r = df_all[(df_all["child_iv"] == iv) & (df_all["fam_scenario"] == "chd_base")]
+    cols = [c for c in ("LE", "WVAS_LIFETIME", "TOTPAY_0_24") if c in r.columns]
+    return len(r) > 0 and float(np.nanmax(np.abs(r[cols].to_numpy(dtype=float)))) < 1e-9
+
+
+def us_births(meta):
+    """{heart_state: U.S. births per year} from the NSCH-weighted birth shares."""
+    sh = meta.get("birth_share")
+    if not sh:
+        return None
+    return {int(h): US_BIRTHS * v for h, v in sh.items()}
+
+
+def cases_prevented(civ, child_w, dmean):
+    """Share of births whose outcome the childhood lever changes, by
+    heart_state: deaths averted before 25 for mortality, otherwise the drop
+    in the share ever having the condition (interpolated like everything
+    else). None if not available."""
+    if civ is None or civ not in CASE_WORDS:
+        return None
+    unit, verb, what = CASE_WORDS[civ]
+    if civ == "mort":
+        if "share_reach_25" not in dmean.columns:
+            return None
+        dp = {int(h): float(v) for h, v in dmean["share_reach_25"].items()}
+    else:
+        ev = load_ever_share(data_stamp())
+        if ev is None:
+            return None
+        e = ev[ev["condition"] == civ].set_index(["child_scenario", "heart_state"])["ever_share"]
+        try:
+            base = e.xs("baseline", level="child_scenario")
+            scen = sum(w * e.xs(c, level="child_scenario") for c, w in child_w)
+        except KeyError:
+            return None
+        dp = {int(h): float(v) for h, v in (base - scen).items()}
+    return {"dp": dp, "unit": unit, "verb": verb, "what": what}
+
+
+def agg_fmt(v, unit, signed=False):
+    """Totals for a birth cohort: dollars in $M/$B, counts and years whole."""
+    if pd.isna(v):
+        return "n/a"
+    sign = ("+" if v >= 0 else "-") if signed else ("-" if v < 0 else "")
+    a = abs(v)
+    if unit == "usd":
+        return "{}${:,.1f}B".format(sign, a / 1e9) if a >= 1e9 else "{}${:,.1f}M".format(sign, a / 1e6)
+    return "{}{:,.0f}".format(sign, a)
 
 
 def life_unit(col):
@@ -992,7 +1064,8 @@ if tab_life is not None:
         has_boot = any(c.endswith("_bootsd") for c in df_all.columns)
         st.subheader("Lifetime outcomes: childhood and adult interventions combined")
 
-        child_ivs = [iv for iv in lv_all.loc[lv_all["child_kind"] == "intervention", "child_iv"].unique()]
+        child_ivs = [iv for iv in lv_all.loc[lv_all["child_kind"] == "intervention", "child_iv"].unique()
+                     if not zero_effect(df_all, iv)]
         child_lab = {INTERVENTION_LABELS.get(iv, iv): iv for iv in child_ivs}
         fam_ivs = [iv for iv in lv_all["fam_iv"].unique() if iv]
         fam_lab = {FAM_IV_LABELS.get(iv, iv): iv for iv in fam_ivs}
@@ -1045,6 +1118,8 @@ if tab_life is not None:
 
         hs_l = group_picker("life_groups", CHD_STATES)
         st.markdown("**Scenario:** {}; {}.".format(c_desc, f_desc))
+        st.caption("Childhood interventions were simulated at 10, 20 and 30% (plus elimination); "
+                   "adult interventions at 10 to 70%.")
 
         outcomes = [(c, l, u, "birth") for c, l, u in LIFE_PER_BIRTH if c in df_all.columns] + \
                    [(c, l, u, "adult") for c, l, u in LIFE_PER_ADULT if c in df_all.columns]
@@ -1055,53 +1130,123 @@ if tab_life is not None:
         dsd = life_at(df_all, child_w, fam_w, [c + "_sd" for c in cols])
         dbs = life_at(df_all, child_w, fam_w, [c + "_bootsd" for c in cols]) if has_boot else None
 
+        # Basis: per child born (average effect), per case prevented (effect on
+        # the children the intervention reaches) or U.S. births per year.
+        civ_sel = civ if (kind == "Intervention" and c_label != "(none)") else None
+        cases = cases_prevented(civ_sel, child_w, dmean) if f_label == "(none)" else None
+        births = us_births(meta)
+        bases = ["Per child born"]
+        if cases is not None:
+            bases.append("Per {} ".format(cases["unit"]) + "prevented" if civ_sel != "mort"
+                         else "Per death averted before 25")
+        if births is not None:
+            bases.append("U.S. births per year")
+        basis = st.radio("Show results", bases, horizontal=True, key="life_basis",
+                         help="Per child born averages over every child in the group, including those "
+                              "the intervention never reaches. Per case prevented divides that by "
+                              "the share of children whose outcome the intervention changes. U.S. "
+                              "births per year multiplies it by the number born in the group each year.")
+        mode = "birth" if basis == "Per child born" else ("us" if basis.startswith("U.S.") else "case")
+
+        def factor(h):
+            if mode == "case":
+                d = cases["dp"].get(h, np.nan)
+                return 1.0 / d if d and d > 1e-9 else np.nan
+            if mode == "us":
+                return births.get(h, np.nan)
+            return 1.0
+
+        if mode == "case":
+            for h in hs_l:
+                d = cases["dp"].get(h, np.nan)
+                if not (d and d > 1e-9):
+                    continue
+                q = dmean.loc[h, "WVAS_LIFETIME"] if "WVAS_LIFETIME" in dmean.columns else np.nan
+                msg = ("**{}:** {} {} in {:.1f} of every 100 children born. {} "
+                       "gains {} lifetime QALYs".format(
+                           HS_LABELS[h], cases["verb"], cases["what"], 100 * d,
+                           "Each death averted" if civ_sel == "mort" else "Each prevented case",
+                           life_fmt(q / d, "q", True)))
+                if "TOTPAY_0_24" in dmean.columns and abs(dmean.loc[h, "TOTPAY_0_24"]) > 1:
+                    msg += " and changes childhood insurer payments by {}".format(
+                        life_fmt(dmean.loc[h, "TOTPAY_0_24"] / d, "usd", True))
+                msg += "; averaged over all 100 births, that is {} QALYs per child born.".format(
+                    life_fmt(q, "q", True))
+                st.markdown(msg)
+        elif mode == "us":
+            st.markdown("Based on {:,.0f} U.S. births in 2025: ".format(US_BIRTHS) + "; ".join(
+                "{} about {:,.0f}".format(HS_LABELS[h].lower(), births[h]) for h in hs_l if h in births)
+                + " per year.")
+
         rows = []
         for c, lab, u, per in outcomes:
+            if mode != "birth" and (per == "adult" or (mode == "case" and c == "share_reach_25")):
+                continue
+            uu = "n" if (mode == "us" and u == "pct") else u
             for h in hs_l:
                 if h not in dmean.index:
                     continue
+                f = factor(h)
                 hw = life_halfwidth(dsd.loc[h, c + "_sd"],
                                     None if dbs is None else dbs.loc[h, c + "_bootsd"], nsim)
-                rows.append({"Per": "Child born" if per == "birth" else "Adult alive at 25",
-                             "Outcome": lab, "Group": HS_LABELS[h],
-                             "Baseline": life_fmt(base_lv.loc[h, c], u),
-                             "With interventions": life_fmt(scen_lv.loc[h, c], u),
-                             "Change": life_fmt(dmean.loc[h, c], u, signed=True),
-                             "95% ±": life_fmt(hw, u)})
+                row = {"Outcome": lab if not (mode == "us" and u == "pct")
+                       else lab.replace(" (%)", " (children)"), "Group": HS_LABELS[h]}
+                if mode == "birth":
+                    row = {"Per": "Child born" if per == "birth" else "Adult alive at 25", **row,
+                           "Baseline": life_fmt(base_lv.loc[h, c], u),
+                           "With interventions": life_fmt(scen_lv.loc[h, c], u)}
+                elif mode == "us":
+                    row.update({"Baseline": agg_fmt(base_lv.loc[h, c] * f, uu),
+                                "With interventions": agg_fmt(scen_lv.loc[h, c] * f, uu)})
+                fmt_ = life_fmt if mode != "us" else agg_fmt
+                row.update({"Change": fmt_(dmean.loc[h, c] * f, uu, signed=True),
+                            "95% ±": fmt_(hw * abs(f), uu)})
+                rows.append(row)
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True, height=420)
+        basis_note = {
+            "birth": "Per child born counts every birth, including children who die before 25. Per "
+                     "adult is the average over those alive at 25, so it can move in either direction "
+                     "when an intervention changes who survives. ",
+            "case": "Per case prevented divides the change per child born by the share of births "
+                    "whose outcome the intervention changes. Children it never reaches are identical "
+                    "in both runs (they share every random draw), so this is the average effect on "
+                    "the children it does reach. Effects after 25 run only through childhood "
+                    "self-rated health, so for conditions they are lower bounds. ",
+            "us": "Totals for one year of U.S. births ({:,.0f} in 2025, CDC/NCHS provisional), split "
+                  "by severity using the NSCH-weighted shares in the model. ".format(US_BIRTHS)}[mode]
         st.caption(
-            "Per child born counts every birth, including children who die before 25. Per adult is "
-            "the average over those alive at 25, so it can move in either direction when an "
-            "intervention changes who survives. Dollars and discounted QALYs are discounted at 3% "
-            "to birth, except medical spending per adult, which is discounted to age 25. "
-            "Childhood insurer payments come from claims and adult medical spending from FAM, so "
-            "they are different measures. " +
+            basis_note +
+            "Dollars and discounted QALYs are discounted at 3% to birth, except medical spending per "
+            "adult, which is discounted to age 25. Childhood insurer payments come from claims and "
+            "adult medical spending from FAM, so they are different measures. " +
             ("Intervals combine Monte Carlo error and uncertainty from the small pool of PSID adults "
              "with childhood heart conditions (bootstrap)." if has_boot else
              "Intervals are Monte Carlo error only; they omit uncertainty from the small pool of "
              "PSID adults with childhood heart conditions, which is larger.") +
-            " Neither includes uncertainty in the estimated model parameters.")
+            " These intervals do not include uncertainty in the estimated model parameters.")
 
         # Net monetary benefit
-        st.markdown("#### Net monetary benefit per child born")
+        st.markdown("#### Net monetary benefit, " + basis.lower().replace("show results ", ""))
         n1, _ = st.columns([1, 2])
         wtp = n1.number_input("Value of one QALY ($)", min_value=0, max_value=500000,
                               value=100000, step=10000, key="life_wtp")
         health, costs_l = "WVAS_LIFETIME_DIS", ["TOTPAY_0_24_DIS", "TOTMD_DIS_PB"]
         if health in dmean.columns and all(c in dmean.columns for c in costs_l):
+            fm_ = agg_fmt if mode == "us" else life_fmt
             nmb = []
             for h in hs_l:
                 if h not in dmean.index:
                     continue
-                dq, dc = dmean.loc[h, health], sum(dmean.loc[h, c] for c in costs_l)
-                nmb.append({"Group": HS_LABELS[h], "Change in discounted QALYs": life_fmt(dq, "q", True),
-                            "Change in discounted spending": life_fmt(dc, "usd", True),
-                            "Net monetary benefit": life_fmt(wtp * dq - dc, "usd", True)})
+                f = factor(h)
+                dq, dc = dmean.loc[h, health] * f, sum(dmean.loc[h, c] for c in costs_l) * f
+                nmb.append({"Group": HS_LABELS[h], "Change in discounted QALYs": fm_(dq, "q", True),
+                            "Change in discounted spending": fm_(dc, "usd", True),
+                            "Net monetary benefit": fm_(wtp * dq - dc, "usd", True)})
             st.dataframe(pd.DataFrame(nmb), width="stretch", hide_index=True)
             st.caption("Value of the QALY change minus the change in medical spending (childhood "
                        "insurer payments plus adult medical spending), both discounted at 3% to "
                        "birth. Program costs are not included, so this is what an intervention "
-                       "could cost per child born and still break even. Point estimates only.")
+                       "could cost, on the basis shown, and still break even. Point estimates only.")
 
         # Survival
         st.markdown("#### Survival from birth")
