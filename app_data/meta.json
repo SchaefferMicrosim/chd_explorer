@@ -1,0 +1,147 @@
+{
+  "generated": "2026-11-21T12:25:49",
+  "host": "vrd-schaeffer2.lahrc.lahealthresearchcloud.org",
+  "revision": "d97ac5f",
+  "nsim": 25,
+  "scenarios": [
+    {
+      "scenario": "baseline",
+      "iv_outcome": "",
+      "rr": 1.0,
+      "pct_reduction": 0.0
+    },
+    {
+      "scenario": "mort_rr_10pct",
+      "iv_outcome": "mort",
+      "rr": 0.9,
+      "pct_reduction": 10.0
+    },
+    {
+      "scenario": "mort_rr_20pct",
+      "iv_outcome": "mort",
+      "rr": 0.8,
+      "pct_reduction": 20.0
+    },
+    {
+      "scenario": "mort_rr_30pct",
+      "iv_outcome": "mort",
+      "rr": 0.7,
+      "pct_reduction": 30.0
+    },
+    {
+      "scenario": "dev_delay_rr_10pct",
+      "iv_outcome": "dev_delay",
+      "rr": 0.9,
+      "pct_reduction": 10.0
+    },
+    {
+      "scenario": "dev_delay_rr_20pct",
+      "iv_outcome": "dev_delay",
+      "rr": 0.8,
+      "pct_reduction": 20.0
+    },
+    {
+      "scenario": "dev_delay_rr_30pct",
+      "iv_outcome": "dev_delay",
+      "rr": 0.7,
+      "pct_reduction": 30.0
+    },
+    {
+      "scenario": "int_dis_modsev_rr_10pct",
+      "iv_outcome": "int_dis_modsev",
+      "rr": 0.9,
+      "pct_reduction": 10.0
+    },
+    {
+      "scenario": "int_dis_modsev_rr_20pct",
+      "iv_outcome": "int_dis_modsev",
+      "rr": 0.8,
+      "pct_reduction": 20.0
+    },
+    {
+      "scenario": "int_dis_modsev_rr_30pct",
+      "iv_outcome": "int_dis_modsev",
+      "rr": 0.7,
+      "pct_reduction": 30.0
+    },
+    {
+      "scenario": "anxiety_rr_10pct",
+      "iv_outcome": "anxiety",
+      "rr": 0.9,
+      "pct_reduction": 10.0
+    },
+    {
+      "scenario": "anxiety_rr_20pct",
+      "iv_outcome": "anxiety",
+      "rr": 0.8,
+      "pct_reduction": 20.0
+    },
+    {
+      "scenario": "anxiety_rr_30pct",
+      "iv_outcome": "anxiety",
+      "rr": 0.7,
+      "pct_reduction": 30.0
+    },
+    {
+      "scenario": "depression_rr_10pct",
+      "iv_outcome": "depression",
+      "rr": 0.9,
+      "pct_reduction": 10.0
+    },
+    {
+      "scenario": "depression_rr_20pct",
+      "iv_outcome": "depression",
+      "rr": 0.8,
+      "pct_reduction": 20.0
+    },
+    {
+      "scenario": "depression_rr_30pct",
+      "iv_outcome": "depression",
+      "rr": 0.7,
+      "pct_reduction": 30.0
+    },
+    {
+      "scenario": "behavioral_problems_rr_10pct",
+      "iv_outcome": "behavioral_problems",
+      "rr": 0.9,
+      "pct_reduction": 10.0
+    },
+    {
+      "scenario": "behavioral_problems_rr_20pct",
+      "iv_outcome": "behavioral_problems",
+      "rr": 0.8,
+      "pct_reduction": 20.0
+    },
+    {
+      "scenario": "behavioral_problems_rr_30pct",
+      "iv_outcome": "behavioral_problems",
+      "rr": 0.7,
+      "pct_reduction": 30.0
+    },
+    {
+      "scenario": "spec_care_rr_10pct",
+      "iv_outcome": "spec_care",
+      "rr": 0.9,
+      "pct_reduction": 10.0
+    },
+    {
+      "scenario": "spec_care_rr_20pct",
+      "iv_outcome": "spec_care",
+      "rr": 0.8,
+      "pct_reduction": 20.0
+    },
+    {
+      "scenario": "spec_care_rr_30pct",
+      "iv_outcome": "spec_care",
+      "rr": 0.7,
+      "pct_reduction": 30.0
+    }
+  ],
+  "lifetime": true,
+  "birth_share": {
+    "0": 0.9859398838919569,
+    "2": 0.01048460994647101,
+    "3": 0.0024787893659463586,
+    "4": 0.0010967167956257196
+  }
+}

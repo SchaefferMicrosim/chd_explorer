@@ -1,0 +1,7 @@
+payer,visit,price
+comm,n_inpatient_visits,46873.788242739836
+comm,n_ed_visits,827.4465277253153
+comm,n_op_clinic_visits,565.2161293970722
+mcaid,n_inpatient_visits,29227.90939723939
+mcaid,n_ed_visits,-82.33853634294768
+mcaid,n_op_clinic_visits,146.11700892978467
