@@ -1099,10 +1099,24 @@ with tab_age:
 # ---------------------------------------------------------------------
 # The burden of CHD (baseline, lifetime): CHD groups vs. no CHD
 # ---------------------------------------------------------------------
+def tile_fmt(v, unit, signed=False):
+    """Headline tiles: one decimal for years and QALYs (tables keep two)."""
+    if unit in ("yr", "q") and not pd.isna(v):
+        return ("{:+,.1f}" if signed else "{:,.1f}").format(v)
+    return life_fmt(v, unit, signed)
+
+
+TILE_HELP = {"TOTMD_DIS": "Average over adults alive at 25, discounted at 3% to age 25. Per child "
+                          "born it is lower for severe CHD, because fewer children reach 25."}
+# Totals for a year of births must count every birth, so they use the per-birth version.
+US_TILE_COL = {"TOTMD_DIS": ("TOTMD_DIS_PB", "Medical spending from 25, discounted")}
+
 BURDEN_TILES = [("LE", "Life expectancy (years)", "yr", False),
                 ("WVAS_LIFETIME", "Lifetime QALYs (VAS)", "q", False),
                 ("TOTPAY_0_24", "Insurer payments, ages 0-24", "usd", True),
-                ("TOTMD_DIS_PB", "Medical spending from 25, discounted", "usd", True),
+                # Per adult alive at 25: per child born, fewer severe-CHD children reach 25,
+                # which outweighs their higher spending and reads as a saving.
+                ("TOTMD_DIS", "Medical spending from 25, per adult", "usd", True),
                 ("IEARN_DIS_PB", "Lifetime earnings, discounted", "usd", False)]
 
 if tab_burden is not None:
@@ -1130,7 +1144,7 @@ if tab_burden is not None:
                 tc[0].markdown("<div style='padding-top:1.6rem;font-weight:600;color:{}'>No CHD</div>"
                                .format(HS_COLORS[0]), unsafe_allow_html=True)
                 for i, (c, lab, u, _) in enumerate(tiles_b):
-                    tc[i + 1].metric(lab, life_fmt(bl.loc[0, c], u))
+                    tc[i + 1].metric(lab, tile_fmt(bl.loc[0, c], u))
             for h in groups:
                 tc = st.columns([1.2] + [2] * len(tiles_b))
                 tc[0].markdown("<div style='padding-top:1.6rem;font-weight:600;color:{}'>{}</div>"
@@ -1138,19 +1152,21 @@ if tab_burden is not None:
                 for i, (c, lab, u, cost) in enumerate(tiles_b):
                     ex = bl.loc[h, c] - bl.loc[0, c]
                     if us_mode:
-                        lab2 = "Life-years" if c == "LE" else lab
+                        c2, lab2 = US_TILE_COL.get(c, (c, "Life-years" if c == "LE" else lab))
+                        ex = bl.loc[h, c2] - bl.loc[0, c2]
                         tc[i + 1].metric(lab2 + ", excess", agg_fmt(ex * births_b[h], u, signed=True))
                     else:
-                        tc[i + 1].metric(lab, life_fmt(bl.loc[h, c], u), life_fmt(ex, u, signed=True),
-                                         delta_color="inverse" if cost else "normal")
+                        tc[i + 1].metric(lab, tile_fmt(bl.loc[h, c], u), tile_fmt(ex, u, signed=True),
+                                         delta_color="inverse" if cost else "normal",
+                                         help=TILE_HELP.get(c))
             if us_mode:
                 tot = st.columns([1.2] + [2] * len(tiles_b))
                 tot[0].markdown("<div style='padding-top:1.6rem;font-weight:600'>All CHD</div>",
                                 unsafe_allow_html=True)
                 for i, (c, lab, u, _) in enumerate(tiles_b):
-                    lab2 = "Life-years" if c == "LE" else lab
+                    c2, lab2 = US_TILE_COL.get(c, (c, "Life-years" if c == "LE" else lab))
                     tot[i + 1].metric(lab2 + ", excess", agg_fmt(
-                        sum((bl.loc[h, c] - bl.loc[0, c]) * births_b[h] for h in groups), u, signed=True))
+                        sum((bl.loc[h, c2] - bl.loc[0, c2]) * births_b[h] for h in groups), u, signed=True))
                 st.markdown("**U.S. births per year** (2025): " + " · ".join(
                     "{} {:,.0f}".format(HS_LABELS[h].lower(), births_b[h]) for h in groups) +
                     ", from {:,.0f} total births and the model's NSCH-weighted severity shares.".format(
